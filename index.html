@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leipzig Glosser</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#6b6a65; --line:#dedbd2; --card:#fff; --accent:#2f5d8a; --warn:#9a5a00; --warnbg:#fff3df; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17181a; --fg:#e8e6e1; --muted:#9a988f; --line:#34353a; --card:#1f2023; --accent:#86b6e6; --warn:#f0b35a; --warnbg:#3a2c14; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.5rem; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 20px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+label { display:block; font-weight:600; margin: 0 0 6px; }
+select, input[type=text], textarea { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font: 16px/1.45 system-ui, sans-serif; }
+textarea { min-height: 140px; resize: vertical; }
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; } .row > div { flex:1 1 220px; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 10px 18px; font-weight: 600; cursor: pointer; font-size: 15px; }
+@media (prefers-color-scheme: dark) { button { color: #10151b; } }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 12px; }
+.status { color: var(--muted); font-size: .92rem; }
+.err { color: #c0392b; }
+.ex { border-top: 1px solid var(--line); padding: 14px 0; }
+.ex:first-child { border-top: 0; padding-top: 0; }
+.num { color: var(--muted); font-size: .85rem; }
+.igt { overflow-x: auto; }
+.igt table { border-collapse: collapse; }
+.igt td { padding: 0 14px 0 0; white-space: nowrap; vertical-align: top; }
+.igt tr.o td { font-style: italic; }
+.sc { font-size: .78em; letter-spacing: .04em; }
+.tr { margin-top: 4px; }
+.warn { margin-top: 6px; font-size: .88rem; color: var(--warn); background: var(--warnbg); border-radius: 6px; padding: 4px 8px; display: inline-block; }
+table.abbr { border-collapse: collapse; font-size: .95rem; }
+table.abbr td { padding: 2px 14px 2px 0; vertical-align: top; }
+.muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1 style="margin-bottom:16px">Leipzig Glosser</h1>
+
+<section>
+  <div class="row">
+    <div>
+      <label for="lang">Language</label>
+      <select id="lang">
+        <option>Norwegian Bokmål</option><option>Norwegian Nynorsk</option><option>English</option>
+        <option>Modern Greek</option><option>Turkish</option><option>German</option><option>Swedish</option>
+        <option>Danish</option><option>French</option><option>Spanish</option><option>Italian</option>
+        <option>Russian</option><option>Finnish</option><option>Hungarian</option><option>Japanese</option>
+        <option value="__other">Other…</option>
+      </select>
+    </div>
+    <div id="otherBox" hidden><label for="other">Language name</label><input id="other" type="text" placeholder="e.g. Icelandic"></div>
+  </div>
+  <div style="margin-top:14px">
+    <label for="input">Text</label>
+    <textarea id="input" placeholder="Paste one or more sentences."></textarea>
+  </div>
+  <label id="latinBox" hidden style="font-weight:400;margin-top:10px"><input type="checkbox" id="latin" checked> Latin letters</label>
+  <div id="codeBox" hidden style="margin-top:12px"><label for="code">Access code</label><input id="code" type="text" placeholder="from the link you were sent"></div>
+  <div class="actions">
+    <button id="go">Gloss</button>
+    <span class="status" id="runStatus"></span>
+  </div>
+</section>
+
+<section id="outSec" hidden>
+  <div id="out"></div>
+</section>
+
+<section id="abbrSec" hidden>
+  <label>Abbreviations</label>
+  <table class="abbr" id="abbr"></table>
+  <p class="status" id="abbrNote"></p>
+</section>
+</main>
+
+<script>window.API_BASE = "https://cemsoknhvwylcel3posy4jucbi0xafpo.lambda-url.eu-north-1.on.aws";</script>
+<script>
+const API = (window.API_BASE || "") + "/api/gloss";
+const CONCURRENCY = 4, MAX_SENTENCES = 200;
+const $ = id => document.getElementById(id);
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+// access code: from the shared link (?k=...), remembered afterwards
+const urlCode = new URLSearchParams(location.search).get("k");
+if (urlCode) store.set("code", urlCode);
+$("code").value = store.get("code") || "";
+$("codeBox").hidden = !!$("code").value;
+$("code").addEventListener("input", () => store.set("code", $("code").value.trim()));
+
+// language choice, remembered
+const savedLang = store.get("lang");
+if (savedLang) {
+  if ([...$("lang").options].some(o => o.value === savedLang)) $("lang").value = savedLang;
+  else { $("lang").value = "__other"; $("other").value = savedLang; }
+}
+const showOther = () => { $("otherBox").hidden = $("lang").value !== "__other"; };
+showOther();
+$("lang").addEventListener("change", () => { showOther(); store.set("lang", langName()); });
+$("other").addEventListener("input", () => store.set("lang", langName()));
+function langName() { return $("lang").value === "__other" ? $("other").value.trim() : $("lang").value; }
+$("input").value = store.get("input") || "";
+// "Latin letters" only matters for text in another script
+const nonLatin = () => /[\p{L}--\p{Script=Latin}]/v.test($("input").value);
+const showLatin = () => { $("latinBox").hidden = !nonLatin(); };
+$("input").addEventListener("input", () => { store.set("input", $("input").value); showLatin(); });
+if (store.get("latin") === "0") $("latin").checked = false;
+$("latin").addEventListener("change", () => store.set("latin", $("latin").checked ? "1" : "0"));
+showLatin();
+
+function sentences(text) {
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text) return [];
+  if (window.Intl && Intl.Segmenter) {
+    return [...new Intl.Segmenter(undefined, { granularity: "sentence" }).segment(text)].map(s => s.segment.trim()).filter(Boolean);
+  }
+  return text.match(/[^.!?…]+[.!?…]*["»”')]*\s*/g).map(s => s.trim()).filter(Boolean);
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// labels as capitals in a smaller size (reads as small caps, pastes as capitals everywhere)
+const SEP = /([-=~.;:\\>()\[\]<])/;
+const isLabel = p => p && p === p.toUpperCase() && /[A-Z0-9]/.test(p) && /[A-Z]|^[123]/.test(p);
+function glossHtml(g, inline) {
+  return String(g || "").split(SEP).map(p => isLabel(p)
+    ? (inline ? `<span style="font-size:.8em">${esc(p)}</span>` : `<span class="sc">${esc(p)}</span>`) : esc(p)).join("");
+}
+const PUNCT = /^[^\p{L}\p{N}]+$/u;
+// columns as in papers: punctuation stays on its word in the example line and gets no gloss of its own
+function columns(r) {
+  const cols = [];
+  let pre = "";
+  r.words.forEach((w, j) => {
+    const seg = r.seg[j] || w;
+    if (PUNCT.test(w)) {
+      if (cols.length && !/^[(\[«“‘"„]/.test(w)) cols[cols.length - 1].o += w; else pre += w;
+    } else { cols.push({ o: pre + seg, g: r.gloss[j] || "?" }); pre = ""; }
+  });
+  if (pre && cols.length) cols[cols.length - 1].o += pre;
+  return cols;
+}
+function exampleHtml(r, i, inline) {
+  const cols = columns(r);
+  const td = inline ? '<td style="padding:0 12px 0 0;vertical-align:top">' : "<td>";
+  return `<table${inline ? ' style="border-collapse:collapse"' : ""}>` +
+    `<tr class="o">${cols.map(c => `${td}${inline ? "<i>" : ""}${esc(c.o)}${inline ? "</i>" : ""}</td>`).join("")}</tr>` +
+    `<tr>${cols.map(c => `${td}${glossHtml(c.g, inline)}</td>`).join("")}</tr>` +
+    `<tr><td colspan="${cols.length}"${inline ? ' style="padding:0"' : ""}>‘${esc(r.translation)}’</td></tr></table>`;
+}
+function examplePlain(r, i) {
+  const cols = columns(r);
+  const w = cols.map(c => Math.max(c.o.length, c.g.length));
+  const line = k => cols.map((c, j) => c[k].padEnd(w[j])).join("  ").trimEnd();
+  return `(${i + 1})\t${line("o")}\n\t${line("g")}\n\t‘${r.translation}’\n`;
+}
+
+let results = [];
+function render() {
+  $("outSec").hidden = !results.length;
+  $("out").innerHTML = results.map((r, i) => {
+    const head = `<div class="num">(${i + 1})</div>`;
+    if (r.error) return `<div class="ex">${head}<div>${esc(r.text)}</div><div class="err">${esc(r.error)}</div></div>`;
+    if (!r.gloss) return `<div class="ex">${head}<div>${esc(r.text)}</div><div class="status">working…</div></div>`;
+    const warn = r.problems.length ? `<div class="warn" title="${esc(r.problems.join("\n"))}">Segmentation and gloss may not line up</div>` : "";
+    return `<div class="ex" data-i="${i}">${head}<div class="igt">${exampleHtml(r, i, false)}</div>${warn}</div>`;
+  }).join("");
+  const abbr = new Map();
+  for (const r of results) for (const [lab, meaning, std] of (r.abbreviations || [])) if (!abbr.has(lab)) abbr.set(lab, [meaning, std]);
+  $("abbrSec").hidden = !abbr.size;
+  const rows = [...abbr.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  $("abbr").innerHTML = rows.map(([lab, [m, std]]) => `<tr><td><span class="sc">${esc(lab)}</span></td><td>${esc(m)}${std ? "" : ' <span class="muted">(not in the standard list)</span>'}</td></tr>`).join("");
+  $("abbrNote").textContent = rows.some(([, [, std]]) => !std) ? "Labels marked “not in the standard list” are allowed by Rule 3 but should be explained in your text." : "";
+}
+
+$("go").addEventListener("click", async () => {
+  const lang = langName(), code = $("code").value.trim();
+  if (!lang) { $("runStatus").innerHTML = '<span class="err">Type the language name.</span>'; return; }
+  if (!code) { $("codeBox").hidden = false; $("runStatus").innerHTML = '<span class="err">Enter the access code.</span>'; return; }
+  let sents = sentences($("input").value);
+  if (!sents.length) { $("runStatus").innerHTML = '<span class="err">Paste some text first.</span>'; return; }
+  const cut = sents.length > MAX_SENTENCES;
+  sents = sents.slice(0, MAX_SENTENCES);
+  results = sents.map(text => ({ text }));
+  render(); $("go").disabled = true;
+  let next = 0, done = 0;
+  const worker = async () => {
+    while (next < results.length) {
+      const r = results[next++];
+      try {
+        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, lang, text: r.text, latin: nonLatin() && $("latin").checked }) });
+        const d = await res.json().catch(() => ({ error: `server error ${res.status}` }));
+        if (!res.ok) r.error = d.error || `server error ${res.status}`; else Object.assign(r, d);
+        if (res.status === 403) { $("codeBox").hidden = false; }
+        if (res.status === 403 || res.status === 429) results.length = next;   // stop: don't send the rest
+      } catch (e) { r.error = "Could not reach the server. Check your internet connection and try again."; }
+      done++; $("runStatus").textContent = `${done} / ${results.length} sentences` + (cut ? ` (only the first ${MAX_SENTENCES} are glossed)` : ""); render();
+    }
+  };
+  $("runStatus").textContent = `0 / ${results.length} sentences`;
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  $("go").disabled = false;
+});
+
+// Ctrl-C on the results: the touched examples go to the clipboard as a Word/Docs table (with italics) and as
+// column-aligned plain text, instead of the browser's default (one word per line).
+document.addEventListener("copy", e => {
+  const sel = getSelection();
+  if (!sel.rangeCount || !$("out").contains(sel.getRangeAt(0).commonAncestorContainer) && !sel.getRangeAt(0).intersectsNode($("out"))) return;
+  const idx = [...document.querySelectorAll("#out .ex[data-i]")].filter(el => sel.containsNode(el, true)).map(el => +el.dataset.i);
+  if (!idx.length) return;
+  const rs = idx.map(i => [results[i], i]).filter(([r]) => r && r.gloss);
+  e.clipboardData.setData("text/html", rs.map(([r, i]) => `<p>(${i + 1})</p>` + exampleHtml(r, i, true)).join(""));
+  e.clipboardData.setData("text/plain", rs.map(([r, i]) => examplePlain(r, i)).join("\n"));
+  e.preventDefault();
+});
+</script>
+</body>
+</html>
