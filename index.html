@@ -51,11 +51,12 @@ table.abbr td { padding: 2px 14px 2px 0; vertical-align: top; }
         <option>Norwegian Bokmål</option><option>Norwegian Nynorsk</option><option>English</option>
         <option>Modern Greek</option><option>Turkish</option><option>German</option><option>Swedish</option>
         <option>Danish</option><option>French</option><option>Spanish</option><option>Italian</option>
-        <option>Russian</option><option>Finnish</option><option>Hungarian</option><option>Japanese</option>
+        <option>Dutch</option><option>Russian</option><option>Finnish</option><option>Hungarian</option><option>Japanese</option>
         <option value="__other">Other…</option>
       </select>
     </div>
     <div id="otherBox" hidden><label for="other">Language name</label><input id="other" type="text" placeholder="e.g. Icelandic"></div>
+    <div><label for="focus">Focus</label><input id="focus" type="text" placeholder="all categories, or e.g. aspect, gender"></div>
   </div>
   <div style="margin-top:14px">
     <label for="input">Text</label>
@@ -100,6 +101,8 @@ $("lang").addEventListener("change", () => { showOther(); store.set("lang", lang
 $("other").addEventListener("input", () => store.set("lang", langName()));
 function langName() { return $("lang").value === "__other" ? $("other").value.trim() : $("lang").value; }
 $("input").value = store.get("input") || "";
+$("focus").value = store.get("focus") || "";
+$("focus").addEventListener("input", () => store.set("focus", $("focus").value));
 // "Latin letters" only matters for text in another script
 const nonLatin = () => /[\p{L}--\p{Script=Latin}]/v.test($("input").value);
 const showLatin = () => { $("latinBox").hidden = !nonLatin(); };
@@ -186,7 +189,7 @@ $("go").addEventListener("click", async () => {
     while (next < results.length) {
       const r = results[next++];
       try {
-        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, text: r.text, latin: nonLatin() && $("latin").checked }) });
+        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, focus: $("focus").value.trim(), text: r.text, latin: nonLatin() && $("latin").checked }) });
         const d = await res.json().catch(() => ({ error: `server error ${res.status}` }));
         if (!res.ok) r.error = d.error || `server error ${res.status}`; else Object.assign(r, d);
         if (res.status === 429) results.length = next;   // stop: don't send the rest
