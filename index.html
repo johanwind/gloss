@@ -61,7 +61,6 @@ table.abbr td { padding: 2px 14px 2px 0; vertical-align: top; }
     <textarea id="input" placeholder="Paste one or more sentences."></textarea>
   </div>
   <label id="latinBox" hidden style="font-weight:400;margin-top:10px"><input type="checkbox" id="latin" checked> Latin letters</label>
-  <div id="codeBox" hidden style="margin-top:12px"><label for="code">Access code</label><input id="code" type="text" placeholder="from the link you were sent"></div>
   <div class="actions">
     <button id="go">Gloss</button>
     <span class="status" id="runStatus"></span>
@@ -87,12 +86,6 @@ const $ = id => document.getElementById(id);
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 
-// access code: from the shared link (?k=...), remembered afterwards
-const urlCode = new URLSearchParams(location.search).get("k");
-if (urlCode) store.set("code", urlCode);
-$("code").value = store.get("code") || "";
-$("codeBox").hidden = !!$("code").value;
-$("code").addEventListener("input", () => store.set("code", $("code").value.trim()));
 
 // language choice, remembered
 const savedLang = store.get("lang");
@@ -179,9 +172,8 @@ function render() {
 }
 
 $("go").addEventListener("click", async () => {
-  const lang = langName(), code = $("code").value.trim();
+  const lang = langName();
   if (!lang) { $("runStatus").innerHTML = '<span class="err">Type the language name.</span>'; return; }
-  if (!code) { $("codeBox").hidden = false; $("runStatus").innerHTML = '<span class="err">Enter the access code.</span>'; return; }
   let sents = sentences($("input").value);
   if (!sents.length) { $("runStatus").innerHTML = '<span class="err">Paste some text first.</span>'; return; }
   const cut = sents.length > MAX_SENTENCES;
@@ -193,11 +185,10 @@ $("go").addEventListener("click", async () => {
     while (next < results.length) {
       const r = results[next++];
       try {
-        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, lang, text: r.text, latin: nonLatin() && $("latin").checked }) });
+        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, text: r.text, latin: nonLatin() && $("latin").checked }) });
         const d = await res.json().catch(() => ({ error: `server error ${res.status}` }));
         if (!res.ok) r.error = d.error || `server error ${res.status}`; else Object.assign(r, d);
-        if (res.status === 403) { $("codeBox").hidden = false; }
-        if (res.status === 403 || res.status === 429) results.length = next;   // stop: don't send the rest
+        if (res.status === 429) results.length = next;   // stop: don't send the rest
       } catch (e) { r.error = "Could not reach the server. Check your internet connection and try again."; }
       done++; $("runStatus").textContent = `${done} / ${results.length} sentences` + (cut ? ` (only the first ${MAX_SENTENCES} are glossed)` : ""); render();
     }
