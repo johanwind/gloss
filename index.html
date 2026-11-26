@@ -64,7 +64,7 @@ table.abbr td { padding: 2px 14px 2px 0; vertical-align: top; }
         <option value="__other">Other…</option>
       </select>
     </div>
-    <div id="focusOtherBox" hidden><label for="focusOther">Focus</label><input id="focusOther" type="text" placeholder="e.g. evidentiality"></div>
+    <div id="focusOtherBox" hidden><label for="focusOther">Other focus</label><input id="focusOther" type="text" placeholder="e.g. evidentiality"></div>
   </div>
   <div style="margin-top:14px">
     <label for="input">Text</label>
@@ -112,15 +112,13 @@ $("input").value = store.get("input") || "";
 // Focus: the listed options are views of the full gloss sent with every answer, so switching is instant;
 // "Other…" sends the typed focus to the model and needs a new run.
 const FOCI = [...$("focus").options].map(o => o.value).filter(v => v && v !== "__other");
-{
-  const f = store.get("focus") || "";
-  if (!f || FOCI.includes(f)) $("focus").value = f; else { $("focus").value = "__other"; $("focusOther").value = f; }
-}
+// a saved focus (older versions saved typed text) selects the option it names, else "All categories"
+const matchFocus = t => { t = t.toLowerCase().trim(); return t ? FOCI.find(o => o === t || o.startsWith(t) || t.includes(o)) : undefined; };
+$("focus").value = matchFocus(store.get("focus") || "") || "";
 const focusName = () => $("focus").value === "__other" ? $("focusOther").value.trim() : $("focus").value;
 const showFocusOther = () => { $("focusOtherBox").hidden = $("focus").value !== "__other"; };
 showFocusOther();
-$("focus").addEventListener("change", () => { showFocusOther(); store.set("focus", focusName()); render(); });
-$("focusOther").addEventListener("input", () => store.set("focus", focusName()));
+$("focus").addEventListener("change", () => { showFocusOther(); store.set("focus", $("focus").value === "__other" ? "" : $("focus").value); render(); });
 // the example as shown for the chosen focus
 function shown(r) {
   const v = r.views && r.views[$("focus").value];
@@ -201,6 +199,8 @@ function render() {
 $("go").addEventListener("click", async () => {
   const lang = langName();
   if (!lang) { $("runStatus").innerHTML = '<span class="err">Type the language name.</span>'; return; }
+  const named = $("focus").value === "__other" && matchFocus($("focusOther").value);
+  if (named) { $("focus").value = named; showFocusOther(); store.set("focus", named); }
   let sents = sentences($("input").value);
   if (!sents.length) { $("runStatus").innerHTML = '<span class="err">Paste some text first.</span>'; return; }
   const cut = sents.length > MAX_SENTENCES;
