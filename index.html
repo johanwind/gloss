@@ -56,7 +56,15 @@ table.abbr td { padding: 2px 14px 2px 0; vertical-align: top; }
       </select>
     </div>
     <div id="otherBox" hidden><label for="other">Language name</label><input id="other" type="text" placeholder="e.g. Icelandic"></div>
-    <div><label for="focus">Focus</label><input id="focus" type="text" placeholder="all categories, or e.g. aspect, gender"></div>
+    <div><label for="focus">Focus</label>
+      <select id="focus">
+        <option value="">All categories</option><option>aspect</option><option>tense</option><option>mood</option>
+        <option>voice</option><option>gender</option><option>number</option><option>case</option>
+        <option>definiteness</option><option>possessive pronouns</option><option>reflexive pronouns</option>
+        <option value="__other">Other…</option>
+      </select>
+    </div>
+    <div id="focusOtherBox" hidden><label for="focusOther">Focus</label><input id="focusOther" type="text" placeholder="e.g. evidentiality"></div>
   </div>
   <div style="margin-top:14px">
     <label for="input">Text</label>
@@ -101,8 +109,23 @@ $("lang").addEventListener("change", () => { showOther(); store.set("lang", lang
 $("other").addEventListener("input", () => store.set("lang", langName()));
 function langName() { return $("lang").value === "__other" ? $("other").value.trim() : $("lang").value; }
 $("input").value = store.get("input") || "";
-$("focus").value = store.get("focus") || "";
-$("focus").addEventListener("input", () => store.set("focus", $("focus").value));
+// Focus: the listed options are views of the full gloss sent with every answer, so switching is instant;
+// "Other…" sends the typed focus to the model and needs a new run.
+const FOCI = [...$("focus").options].map(o => o.value).filter(v => v && v !== "__other");
+{
+  const f = store.get("focus") || "";
+  if (!f || FOCI.includes(f)) $("focus").value = f; else { $("focus").value = "__other"; $("focusOther").value = f; }
+}
+const focusName = () => $("focus").value === "__other" ? $("focusOther").value.trim() : $("focus").value;
+const showFocusOther = () => { $("focusOtherBox").hidden = $("focus").value !== "__other"; };
+showFocusOther();
+$("focus").addEventListener("change", () => { showFocusOther(); store.set("focus", focusName()); render(); });
+$("focusOther").addEventListener("input", () => store.set("focus", focusName()));
+// the example as shown for the chosen focus
+function shown(r) {
+  const v = r.views && r.views[$("focus").value];
+  return v ? { ...r, seg: v.seg, gloss: v.gloss, abbreviations: v.abbreviations } : r;
+}
 // "Latin letters" only matters for text in another script
 const nonLatin = () => /[\p{L}--\p{Script=Latin}]/v.test($("input").value);
 const showLatin = () => { $("latinBox").hidden = !nonLatin(); };
@@ -160,7 +183,7 @@ function examplePlain(r, i) {
 let results = [];
 function render() {
   $("outSec").hidden = !results.length;
-  $("out").innerHTML = results.map((r, i) => {
+  $("out").innerHTML = results.map(shown).map((r, i) => {
     const head = `<div class="num">(${i + 1})</div>`;
     if (r.error) return `<div class="ex">${head}<div>${esc(r.text)}</div><div class="err">${esc(r.error)}</div></div>`;
     if (!r.gloss) return `<div class="ex">${head}<div>${esc(r.text)}</div><div class="status">working…</div></div>`;
@@ -168,7 +191,7 @@ function render() {
     return `<div class="ex" data-i="${i}">${head}<div class="igt">${exampleHtml(r, i, false)}</div>${warn}</div>`;
   }).join("");
   const abbr = new Map();
-  for (const r of results) for (const [lab, meaning, std] of (r.abbreviations || [])) if (!abbr.has(lab)) abbr.set(lab, [meaning, std]);
+  for (const r of results.map(shown)) for (const [lab, meaning, std] of (r.abbreviations || [])) if (!abbr.has(lab)) abbr.set(lab, [meaning, std]);
   $("abbrSec").hidden = !abbr.size;
   const rows = [...abbr.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   $("abbr").innerHTML = rows.map(([lab, [m, std]]) => `<tr><td><span class="sc">${esc(lab)}</span></td><td>${esc(m)}${std ? "" : ' <span class="muted">(not in the standard list)</span>'}</td></tr>`).join("");
@@ -189,7 +212,7 @@ $("go").addEventListener("click", async () => {
     while (next < results.length) {
       const r = results[next++];
       try {
-        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, focus: $("focus").value.trim(), text: r.text, latin: nonLatin() && $("latin").checked }) });
+        const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, focus: $("focus").value === "__other" ? focusName() : "", text: r.text, latin: nonLatin() && $("latin").checked }) });
         const d = await res.json().catch(() => ({ error: `server error ${res.status}` }));
         if (!res.ok) r.error = d.error || `server error ${res.status}`; else Object.assign(r, d);
         if (res.status === 429) results.length = next;   // stop: don't send the rest
@@ -209,7 +232,7 @@ document.addEventListener("copy", e => {
   if (!sel.rangeCount || !$("out").contains(sel.getRangeAt(0).commonAncestorContainer) && !sel.getRangeAt(0).intersectsNode($("out"))) return;
   const idx = [...document.querySelectorAll("#out .ex[data-i]")].filter(el => sel.containsNode(el, true)).map(el => +el.dataset.i);
   if (!idx.length) return;
-  const rs = idx.map(i => [results[i], i]).filter(([r]) => r && r.gloss);
+  const rs = idx.map(i => [results[i] && shown(results[i]), i]).filter(([r]) => r && r.gloss);
   e.clipboardData.setData("text/html", rs.map(([r, i]) => `<p>(${i + 1})</p>` + exampleHtml(r, i, true)).join(""));
   e.clipboardData.setData("text/plain", rs.map(([r, i]) => examplePlain(r, i)).join("\n"));
   e.preventDefault();
